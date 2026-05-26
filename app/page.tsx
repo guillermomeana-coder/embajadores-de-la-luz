@@ -3,14 +3,114 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { VILLAGES, Village } from '@/lib/villages';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
 type VillageState = 'unlit' | 'lit' | 'funded';
 type VillageWithState = Village & { state: VillageState };
 type Pos = { x: number; y: number };
 type Phrase = { id: number; x: number; y: number; text: string };
 type Ember = { x: number; y: number; tx: number; ty: number; color: string };
 
-// ─── Flower of Life ──────────────────────────────────────────────────────────
+// ─── Ambient Music (Web Audio API) ───────────────────────────────────────────
+function useAmbientMusic() {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const start = useCallback(() => {
+    if (ctxRef.current) return;
+    const ctx = new AudioContext();
+    ctxRef.current = ctx;
+
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 3);
+    master.connect(ctx.destination);
+    gainRef.current = master;
+
+    // Reverb via convolver
+    const convolver = ctx.createConvolver();
+    const rate = ctx.sampleRate;
+    const len = rate * 4;
+    const buf = ctx.createBuffer(2, len, rate);
+    for (let c = 0; c < 2; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+    }
+    convolver.buffer = buf;
+    convolver.connect(master);
+
+    const dry = ctx.createGain();
+    dry.gain.value = 0.4;
+    dry.connect(master);
+
+    // Drone tones
+    const tones = [
+      { freq: 110, type: 'sine' as OscillatorType, gain: 0.4 },
+      { freq: 165, type: 'sine' as OscillatorType, gain: 0.25 },
+      { freq: 220, type: 'sine' as OscillatorType, gain: 0.18 },
+      { freq: 275, type: 'sine' as OscillatorType, gain: 0.12 },
+      { freq: 55, type: 'sine' as OscillatorType, gain: 0.3 },
+    ];
+
+    tones.forEach(({ freq, type, gain }, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = freq;
+      // Slow frequency drift
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.03 + i * 0.01;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = freq * 0.008;
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc.frequency);
+      lfo.start();
+
+      const oscGain = ctx.createGain();
+      oscGain.gain.value = gain * 0.12;
+      osc.connect(oscGain);
+      oscGain.connect(convolver);
+      oscGain.connect(dry);
+      osc.start();
+    });
+
+    // Bell-like ping every ~8s
+    const ping = () => {
+      if (!ctxRef.current) return;
+      const c = ctxRef.current;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.frequency.value = 528 + Math.random() * 180;
+      osc.type = 'sine';
+      g.gain.setValueAtTime(0, c.currentTime);
+      g.gain.linearRampToValueAtTime(0.08, c.currentTime + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 4);
+      osc.connect(g);
+      g.connect(convolver);
+      osc.start();
+      osc.stop(c.currentTime + 4.5);
+      setTimeout(ping, 7000 + Math.random() * 8000);
+    };
+    setTimeout(ping, 2000);
+    setPlaying(true);
+  }, []);
+
+  const toggle = useCallback(() => {
+    if (!ctxRef.current) { start(); return; }
+    const ctx = ctxRef.current;
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+      gainRef.current?.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 1);
+      setPlaying(true);
+    } else {
+      gainRef.current?.gain.linearRampToValueAtTime(0, ctx.currentTime + 1);
+      setTimeout(() => ctx.suspend(), 1100);
+      setPlaying(false);
+    }
+  }, [start]);
+
+  return { playing, toggle };
+}
+
+// ─── Flower of Life ───────────────────────────────────────────────────────────
 function FlowerOfLife() {
   const r = 80;
   const positions: [number, number][] = [
@@ -20,7 +120,7 @@ function FlowerOfLife() {
     [r * Math.sqrt(3) / 2, -r * 1.5], [-r * Math.sqrt(3) / 2, -r * 1.5],
   ];
   return (
-    <svg viewBox="-500 -500 1000 1000" xmlns="http://www.w3.org/2000/svg">
+    <svg width="1400" height="1400" viewBox="-500 -500 1000 1000" xmlns="http://www.w3.org/2000/svg">
       <g fill="none" stroke="#e8c96d" strokeWidth="0.8">
         {positions.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={r} />)}
         {Array.from({ length: 18 }).map((_, i) => {
@@ -29,18 +129,18 @@ function FlowerOfLife() {
           const y = Math.sin(a) * r * 2 * Math.sqrt(3) * 0.86;
           return <circle key={'o' + i} cx={x} cy={y} r={r} />;
         })}
-        <circle cx="0" cy="0" r={r * 4} stroke="#e8c96d" strokeWidth="1" />
-        <circle cx="0" cy="0" r={r * 4.6} stroke="#e8c96d" strokeWidth="0.5" />
+        <circle cx="0" cy="0" r={r * 4} strokeWidth="1" />
+        <circle cx="0" cy="0" r={r * 4.6} strokeWidth="0.5" />
       </g>
     </svg>
   );
 }
 
-// ─── Mandala ─────────────────────────────────────────────────────────────────
+// ─── Mandala ──────────────────────────────────────────────────────────────────
 function Mandala({ progress }: { progress: number }) {
   const petals = 16;
   return (
-    <svg viewBox="-110 -110 220 220" style={{ width: '100%', height: '100%' }}>
+    <svg viewBox="-110 -110 220 220" width="220" height="220" style={{ width: '100%', height: '100%' }}>
       <defs>
         <radialGradient id="mg" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="#fffbe8" stopOpacity="0.95" />
@@ -56,35 +156,28 @@ function Mandala({ progress }: { progress: number }) {
       <circle cx="0" cy="0" r="100" fill="url(#mg)" opacity="0.55" />
       {Array.from({ length: petals }).map((_, i) => {
         const a = (Math.PI * 2 * i) / petals;
-        const x = Math.cos(a) * 78;
-        const y = Math.sin(a) * 78;
+        const x = Math.cos(a) * 78, y = Math.sin(a) * 78;
         const lit = i < Math.round(petals * progress);
         return (
-          <g key={i} transform={`translate(${x}, ${y}) rotate(${(a * 180) / Math.PI + 90})`}>
+          <g key={i} transform={`translate(${x},${y}) rotate(${(a * 180) / Math.PI + 90})`}>
             <ellipse cx="0" cy="0" rx="6" ry="14"
               fill={lit ? '#fffbe8' : 'transparent'}
               stroke={lit ? '#fffbe8' : 'rgba(245,234,214,0.4)'}
-              strokeWidth="0.8"
-              opacity={lit ? 0.9 : 0.45}
-              style={{ filter: lit ? 'drop-shadow(0 0 6px rgba(232,201,109,0.9))' : 'none' }}
-            />
+              strokeWidth="0.8" opacity={lit ? 0.9 : 0.45}
+              style={{ filter: lit ? 'drop-shadow(0 0 6px rgba(232,201,109,0.9))' : 'none' }} />
           </g>
         );
       })}
       {[60, 50, 40, 30].map((r, i) => (
-        <circle key={r} cx="0" cy="0" r={r}
-          fill="none" stroke="rgba(245,234,214,0.35)"
-          strokeWidth={i === 0 ? 1 : 0.6}
+        <circle key={r} cx="0" cy="0" r={r} fill="none"
+          stroke="rgba(245,234,214,0.35)" strokeWidth={i === 0 ? 1 : 0.6}
           strokeDasharray={i === 1 ? '2 3' : undefined} />
       ))}
       {Array.from({ length: 8 }).map((_, i) => {
         const a = (Math.PI * 2 * i) / 8;
-        return (
-          <line key={i}
-            x1={Math.cos(a) * 30} y1={Math.sin(a) * 30}
-            x2={Math.cos(a) * 60} y2={Math.sin(a) * 60}
-            stroke="rgba(245,234,214,0.3)" strokeWidth="0.6" />
-        );
+        return <line key={i} x1={Math.cos(a) * 30} y1={Math.sin(a) * 30}
+          x2={Math.cos(a) * 60} y2={Math.sin(a) * 60}
+          stroke="rgba(245,234,214,0.3)" strokeWidth="0.6" />;
       })}
       <circle cx="0" cy="0" r="30" fill="url(#mgInner)" />
       <circle cx="0" cy="0" r="30" fill="none" stroke="#e8c96d" strokeWidth="1" opacity="0.7" />
@@ -94,83 +187,81 @@ function Mandala({ progress }: { progress: number }) {
   );
 }
 
-// ─── Sun Rays ────────────────────────────────────────────────────────────────
+// ─── Sun Rays ─────────────────────────────────────────────────────────────────
 function SunRays() {
   return (
-    <svg viewBox="-100 -100 200 200" style={{ width: '100%', height: '100%' }}>
+    <svg viewBox="-100 -100 200 200" width="220" height="220" style={{ width: '100%', height: '100%' }}>
       {Array.from({ length: 24 }).map((_, i) => {
         const a = (Math.PI * 2 * i) / 24;
         const long = i % 2 === 0;
-        return (
-          <line key={i}
-            x1={Math.cos(a) * 50} y1={Math.sin(a) * 50}
-            x2={Math.cos(a) * (long ? 95 : 75)} y2={Math.sin(a) * (long ? 95 : 75)}
-            stroke="#fffbe8"
-            strokeWidth={long ? 1.2 : 0.6}
-            opacity={long ? 0.9 : 0.6}
-            strokeLinecap="round"
-          />
-        );
+        return <line key={i}
+          x1={Math.cos(a) * 50} y1={Math.sin(a) * 50}
+          x2={Math.cos(a) * (long ? 95 : 75)} y2={Math.sin(a) * (long ? 95 : 75)}
+          stroke="#fffbe8" strokeWidth={long ? 1.2 : 0.6}
+          opacity={long ? 0.9 : 0.6} strokeLinecap="round" />;
       })}
     </svg>
   );
 }
 
-// ─── Village Icons ───────────────────────────────────────────────────────────
+// ─── Village Icons ────────────────────────────────────────────────────────────
 const VICONS: Record<string, React.ReactNode> = {
   educacion: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M8 24 L32 14 L56 24 L32 34 Z" />
-      <path d="M16 27 V41 C16 41 22 46 32 46 C42 46 48 41 48 41 V27" />
-      <line x1="56" y1="24" x2="56" y2="38" />
-      <circle cx="56" cy="40" r="1.5" fill="currentColor" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 26 L32 14 L56 26 L32 38 Z" />
+      <path d="M18 30 V44 C18 44 24 50 32 50 C40 50 46 44 46 44 V30" />
+      <line x1="56" y1="26" x2="56" y2="40" />
+      <circle cx="56" cy="42" r="2" fill="currentColor" stroke="none" />
+      <line x1="32" y1="14" x2="32" y2="8" />
+      <line x1="28" y1="10" x2="36" y2="10" />
     </svg>
   ),
   salud: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M32 52 C16 42 10 30 14 22 C18 14 26 14 32 22 C38 14 46 14 50 22 C54 30 48 42 32 52 Z" />
-      <path d="M32 30 V40 M27 35 H37" stroke="currentColor" strokeWidth="2" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M32 52 C14 40 10 28 14 20 C18 12 26 12 32 22 C38 12 46 12 50 20 C54 28 50 40 32 52 Z" />
+      <line x1="32" y1="30" x2="32" y2="42" strokeWidth="2.2" />
+      <line x1="26" y1="36" x2="38" y2="36" strokeWidth="2.2" />
     </svg>
   ),
   arte: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M32 12 C20 12 10 22 10 34 C10 42 16 46 22 44 C26 43 26 39 24 36 C22 33 24 30 28 30 H38 C46 30 52 24 52 18 C52 14 44 12 32 12 Z" />
-      <circle cx="22" cy="24" r="2.5" fill="currentColor" />
-      <circle cx="32" cy="20" r="2.5" fill="currentColor" />
-      <circle cx="42" cy="24" r="2.5" fill="currentColor" />
-      <circle cx="46" cy="32" r="2.5" fill="currentColor" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M32 10 C19 10 8 20 8 34 C8 43 14 48 22 46 C26 45 27 40 24 37 C21 34 23 30 28 30 H38 C47 30 54 23 54 17 C54 12 44 10 32 10 Z" />
+      <circle cx="22" cy="22" r="3" fill="currentColor" stroke="none" />
+      <circle cx="32" cy="18" r="3" fill="currentColor" stroke="none" />
+      <circle cx="42" cy="22" r="3" fill="currentColor" stroke="none" />
     </svg>
   ),
   ambiente: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M32 14 C26 22 22 28 22 36 C22 42 26 46 32 46 C38 46 42 42 42 36 C42 28 38 22 32 14 Z" />
-      <line x1="32" y1="28" x2="32" y2="52" />
-      <path d="M32 38 L26 34 M32 42 L38 38" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M32 12 C26 20 20 28 20 38 C20 44 25 50 32 50 C39 50 44 44 44 38 C44 28 38 20 32 12 Z" />
+      <line x1="32" y1="26" x2="32" y2="54" />
+      <path d="M32 36 L24 32" />
+      <path d="M32 42 L40 38" />
     </svg>
   ),
   animal: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 22 C16 18 18 14 22 14 C24 14 26 16 26 18 L26 24" />
-      <path d="M48 22 C48 18 46 14 42 14 C40 14 38 16 38 18 L38 24" />
-      <path d="M20 30 C20 24 26 20 32 20 C38 20 44 24 44 30 C44 34 42 38 38 40 L38 46 C38 48 36 50 34 50 L30 50 C28 50 26 48 26 46 L26 40 C22 38 20 34 20 30 Z" />
-      <circle cx="28" cy="30" r="1.5" fill="currentColor" />
-      <circle cx="36" cy="30" r="1.5" fill="currentColor" />
-      <path d="M30 36 C31 37 33 37 34 36" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 22 C16 17 19 13 23 13 C26 13 28 16 28 19 L28 25" />
+      <path d="M48 22 C48 17 45 13 41 13 C38 13 36 16 36 19 L36 25" />
+      <path d="M20 32 C20 25 26 20 32 20 C38 20 44 25 44 32 C44 37 42 41 38 43 L38 49 C38 51 36 53 34 53 L30 53 C28 53 26 51 26 49 L26 43 C22 41 20 37 20 32 Z" />
+      <circle cx="28" cy="31" r="2" fill="currentColor" stroke="none" />
+      <circle cx="36" cy="31" r="2" fill="currentColor" stroke="none" />
+      <path d="M29 38 C30 40 34 40 35 38" />
     </svg>
   ),
   comunidad: (
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="22" cy="22" r="6" />
-      <circle cx="42" cy="22" r="6" />
-      <circle cx="32" cy="40" r="6" />
-      <path d="M22 32 C16 34 12 40 12 48 H32" />
-      <path d="M42 32 C48 34 52 40 52 48 H32" />
-      <path d="M32 50 C26 50 22 54 22 58 H42 C42 54 38 50 32 50" />
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="22" cy="20" r="7" />
+      <circle cx="42" cy="20" r="7" />
+      <circle cx="32" cy="40" r="7" />
+      <path d="M22 30 C15 33 11 40 10 50 H30" />
+      <path d="M42 30 C49 33 53 40 54 50 H34" />
+      <path d="M32 50 C25 50 21 55 20 60 H44 C43 55 39 50 32 50" />
     </svg>
   ),
 };
 
-// ─── Paths Layer ─────────────────────────────────────────────────────────────
+// ─── Paths Layer ──────────────────────────────────────────────────────────────
 function PathsLayer({ positions, hub, villages }: { positions: Pos[]; hub: Pos; villages: VillageWithState[] }) {
   return (
     <svg className="paths-svg" viewBox="0 0 1440 900" preserveAspectRatio="none">
@@ -182,8 +273,12 @@ function PathsLayer({ positions, hub, villages }: { positions: Pos[]; hub: Pos; 
           <stop offset="80%" stopColor="#e8c96d" stopOpacity="0.55" />
           <stop offset="100%" stopColor="#e8c96d" stopOpacity="0.0" />
         </linearGradient>
-        <filter id="pathGlow" x="-50%" y="-50%" width="200%" height="200%">
+        <filter id="pathGlow">
           <feGaussianBlur stdDeviation="3" />
+        </filter>
+        <filter id="nodeGlow">
+          <feGaussianBlur stdDeviation="6" result="blur" />
+          <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
       </defs>
       {positions.map((p, i) => {
@@ -195,19 +290,21 @@ function PathsLayer({ positions, hub, villages }: { positions: Pos[]; hub: Pos; 
         return (
           <g key={v.id}>
             <path d={d} stroke={lit ? '#e8c96d' : 'rgba(245,234,214,0.18)'}
-              strokeWidth={lit ? 7 : 3} fill="none"
-              opacity={lit ? 0.35 : 0.5} filter="url(#pathGlow)" />
+              strokeWidth={lit ? 8 : 3} fill="none" opacity={lit ? 0.3 : 0.4} filter="url(#pathGlow)" />
             <path d={d}
-              stroke={lit ? 'url(#pathGrad)' : 'rgba(245,234,214,0.25)'}
-              strokeWidth={lit ? 1.6 : 0.8} fill="none"
-              strokeDasharray={lit ? undefined : '3 4'}
-              strokeLinecap="round" />
-            {lit && (
-              <circle r="2.5" fill="#fffbe8">
+              stroke={lit ? 'url(#pathGrad)' : 'rgba(245,234,214,0.22)'}
+              strokeWidth={lit ? 2 : 0.8} fill="none"
+              strokeDasharray={lit ? undefined : '4 5'} strokeLinecap="round" />
+            {lit && <>
+              <circle r="3" fill="#fffbe8" opacity="0.9">
                 <animateMotion dur={`${4 + (i % 3)}s`} repeatCount="indefinite" path={d} />
                 <animate attributeName="opacity" values="0;1;1;0" dur={`${4 + (i % 3)}s`} repeatCount="indefinite" />
               </circle>
-            )}
+              <circle r="5" fill="#e8c96d" opacity="0.4">
+                <animateMotion dur={`${4 + (i % 3)}s`} repeatCount="indefinite" path={d} begin={`${(i % 3) * 0.5}s`} />
+                <animate attributeName="opacity" values="0;0.5;0.5;0" dur={`${4 + (i % 3)}s`} repeatCount="indefinite" begin={`${(i % 3) * 0.5}s`} />
+              </circle>
+            </>}
           </g>
         );
       })}
@@ -215,7 +312,7 @@ function PathsLayer({ positions, hub, villages }: { positions: Pos[]; hub: Pos; 
   );
 }
 
-// ─── Particles Canvas ─────────────────────────────────────────────────────────
+// ─── Particles Canvas ──────────────────────────────────────────────────────────
 function Particles({ density = 1, embers }: { density?: number; embers: Ember[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const embersRef = useRef<Ember[]>(embers);
@@ -226,7 +323,6 @@ function Particles({ density = 1, embers }: { density?: number; embers: Ember[] 
     if (!c) return;
     const ctx = c.getContext('2d')!;
     const dpr = window.devicePixelRatio || 1;
-
     const resize = () => {
       c.width = c.offsetWidth * dpr;
       c.height = c.offsetHeight * dpr;
@@ -235,78 +331,53 @@ function Particles({ density = 1, embers }: { density?: number; embers: Ember[] 
     };
     resize();
     window.addEventListener('resize', resize);
-
-    const ww = () => c.offsetWidth;
-    const hh = () => c.offsetHeight;
-    const colors = ['#e8c96d', '#fffbe8', '#c9872a'];
-    const N = Math.floor(80 * density);
+    const ww = () => c.offsetWidth, hh = () => c.offsetHeight;
+    const colors = ['#e8c96d', '#fffbe8', '#c9872a', '#f5ead6'];
+    const N = Math.floor(100 * density);
     const parts = Array.from({ length: N }, () => ({
       x: Math.random() * ww(), y: Math.random() * hh(),
-      vx: (Math.random() - 0.5) * 0.15,
-      vy: -0.15 - Math.random() * 0.25,
-      r: 0.6 + Math.random() * 2.2,
-      a: 0.2 + Math.random() * 0.7,
+      vx: (Math.random() - 0.5) * 0.2, vy: -0.1 - Math.random() * 0.3,
+      r: 0.5 + Math.random() * 2.5, a: 0.15 + Math.random() * 0.7,
       phase: Math.random() * Math.PI * 2,
       hue: colors[Math.floor(Math.random() * colors.length)],
     }));
-
-    let travellers: Array<{ x: number; y: number; tx: number; ty: number; t: number; dur: number; color: string; size: number }> = [];
+    type Traveller = { x: number; y: number; tx: number; ty: number; t: number; dur: number; color: string; size: number };
+    let travellers: Traveller[] = [];
     let lastEmbers = embersRef.current;
-    let t = 0;
-    let raf: number;
-
+    let t = 0, raf: number;
     const tick = () => {
       t += 0.016;
       ctx.clearRect(0, 0, ww(), hh());
-
       if (embersRef.current !== lastEmbers) {
         embersRef.current.forEach((e) => {
-          for (let i = 0; i < 14; i++) {
-            travellers.push({
-              x: e.x + (Math.random() - 0.5) * 30,
-              y: e.y + (Math.random() - 0.5) * 30,
-              tx: e.tx, ty: e.ty,
-              t: 0, dur: 1.4 + Math.random() * 1.4,
-              color: e.color, size: 1.5 + Math.random() * 2,
-            });
+          for (let i = 0; i < 18; i++) {
+            travellers.push({ x: e.x + (Math.random()-0.5)*40, y: e.y + (Math.random()-0.5)*40, tx: e.tx, ty: e.ty, t: 0, dur: 1.2 + Math.random()*1.6, color: e.color, size: 1.5 + Math.random()*2.5 });
           }
         });
         lastEmbers = embersRef.current;
       }
-
       parts.forEach((p) => {
-        p.x += p.vx; p.y += p.vy; p.phase += 0.02;
-        if (p.y < -10) { p.y = hh() + 10; p.x = Math.random() * ww(); }
-        if (p.x < -10) p.x = ww() + 10;
-        if (p.x > ww() + 10) p.x = -10;
+        p.x += p.vx; p.y += p.vy; p.phase += 0.018;
+        if (p.y < -10) { p.y = hh()+10; p.x = Math.random()*ww(); }
+        if (p.x < -10) p.x = ww()+10;
+        if (p.x > ww()+10) p.x = -10;
         const aa = p.a * (0.5 + 0.5 * Math.sin(p.phase));
-        ctx.beginPath();
-        ctx.fillStyle = p.hue;
-        ctx.globalAlpha = aa;
-        ctx.shadowColor = p.hue;
-        ctx.shadowBlur = 10;
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.fillStyle = p.hue; ctx.globalAlpha = aa;
+        ctx.shadowColor = p.hue; ctx.shadowBlur = 12;
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
       });
-
-      travellers = travellers.filter((tr) => tr.t < 1);
+      travellers = travellers.filter(tr => tr.t < 1);
       travellers.forEach((tr) => {
         tr.t += 0.016 / tr.dur;
         const e = 1 - Math.pow(1 - tr.t, 3);
-        const cx = tr.x + (tr.tx - tr.x) * e;
-        const cy = tr.y + (tr.ty - tr.y) * e;
-        const drift = Math.sin(t * 4 + tr.x) * 6 * (1 - tr.t);
-        ctx.beginPath();
-        ctx.fillStyle = tr.color;
-        ctx.globalAlpha = (1 - tr.t) * 0.9 + 0.1;
-        ctx.shadowColor = tr.color;
-        ctx.shadowBlur = 14;
-        ctx.arc(cx + drift, cy, tr.size, 0, Math.PI * 2);
-        ctx.fill();
+        const cx = tr.x + (tr.tx - tr.x)*e, cy = tr.y + (tr.ty - tr.y)*e;
+        const drift = Math.sin(t*4 + tr.x) * 8 * (1-tr.t);
+        ctx.beginPath(); ctx.fillStyle = tr.color;
+        ctx.globalAlpha = (1-tr.t)*0.9 + 0.1;
+        ctx.shadowColor = tr.color; ctx.shadowBlur = 16;
+        ctx.arc(cx+drift, cy, tr.size, 0, Math.PI*2); ctx.fill();
       });
-
-      ctx.globalAlpha = 1;
-      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -322,7 +393,7 @@ function VillageNode({ v, pos, selected, onSelect }: { v: VillageWithState; pos:
     <div
       className={`village${selected ? ' selected' : ''}`}
       data-state={v.state}
-      style={{ left: pos.x + 'px', top: pos.y + 'px', ['--v-color' as string]: v.color }}
+      style={{ left: pos.x+'px', top: pos.y+'px', ['--v-color' as string]: v.color }}
       onClick={() => onSelect(v.id)}
     >
       <div className="v-aura" />
@@ -349,33 +420,20 @@ function DetailCard({ v, pos, onClose, onDonate }: { v: VillageWithState; pos: P
   left = Math.min(Math.max(margin, left), W - CARD_W - margin);
   let top = pos.y - CARD_H / 2;
   top = Math.min(Math.max(100, top), H - CARD_H - margin);
-
   return (
-    <div className="detail-card" style={{ left: left + 'px', top: top + 'px', ['--dc-color' as string]: v.color }}>
+    <div className="detail-card" style={{ left: left+'px', top: top+'px', ['--dc-color' as string]: v.color }}>
       <button className="dc-close" onClick={onClose}>✕</button>
-      <div className="dc-eyebrow">
-        <span className="dot" />
-        Aldea de {v.name}
-      </div>
+      <div className="dc-eyebrow"><span className="dot" /> Aldea de {v.name}</div>
       <h2 className="dc-title">{v.name}</h2>
       <div className="dc-loc">{v.location}</div>
       <p className="dc-desc">{v.description} <em>{v.italic}</em></p>
       <div className="dc-stats">
-        <div>
-          <div className="dc-stat-num">${v.raised.toLocaleString('es-MX')}</div>
-          <div className="dc-stat-lbl">Luz recibida</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div className="dc-stat-num">{v.supporters}</div>
-          <div className="dc-stat-lbl">Embajadores</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="dc-stat-num">{v.days}</div>
-          <div className="dc-stat-lbl">Días de luz</div>
-        </div>
+        <div><div className="dc-stat-num">${v.raised.toLocaleString('es-MX')}</div><div className="dc-stat-lbl">Luz recibida</div></div>
+        <div style={{ textAlign:'center' }}><div className="dc-stat-num">{v.supporters}</div><div className="dc-stat-lbl">Embajadores</div></div>
+        <div style={{ textAlign:'right' }}><div className="dc-stat-num">{v.days}</div><div className="dc-stat-lbl">Días de luz</div></div>
       </div>
       <div className="dc-progress-track">
-        <div className="dc-progress-fill" style={{ width: pct + '%' }} />
+        <div className="dc-progress-fill" style={{ width: pct+'%' }} />
       </div>
       <div className="dc-progress-meta">
         <span>{Math.round(pct)}% iluminado</span>
@@ -384,15 +442,11 @@ function DetailCard({ v, pos, onClose, onDonate }: { v: VillageWithState; pos: P
       <div className="dc-divider" />
       <div className="dc-amounts">
         {presets.map((p) => (
-          <button key={p} className={`dc-amount${amount === p ? ' active' : ''}`} onClick={() => setAmount(p)}>
-            ${p}
-          </button>
+          <button key={p} className={`dc-amount${amount === p ? ' active' : ''}`} onClick={() => setAmount(p)}>${p}</button>
         ))}
       </div>
       <button className="dc-cta" onClick={() => onDonate(v.id, amount)}>
-        <span className="spark" />
-        Dona tu luz
-        <span className="spark" />
+        <span className="spark" /> Dona tu luz <span className="spark" />
       </button>
       <div className="dc-foot">
         <span>✦ Donación deducible de impuestos</span>
@@ -406,6 +460,7 @@ function DetailCard({ v, pos, onClose, onDonate }: { v: VillageWithState; pos: P
 export default function World() {
   const W = 1440, H = 900;
   const scalerRef = useRef<HTMLDivElement>(null);
+  const { playing, toggle: toggleMusic } = useAmbientMusic();
 
   const [villages, setVillages] = useState<VillageWithState[]>(() =>
     VILLAGES.map((v) => {
@@ -446,7 +501,6 @@ export default function World() {
 
   const totalRaised = villages.reduce((a, v) => a + v.raised, 0);
   const totalSupporters = villages.reduce((a, v) => a + v.supporters, 0);
-
   const selected = villages.find((v) => v.id === selectedId);
   const selectedIdx = villages.findIndex((v) => v.id === selectedId);
   const selectedPos = selectedIdx >= 0 ? positions[selectedIdx] : null;
@@ -462,8 +516,7 @@ export default function World() {
       return { ...v, raised: newRaised, supporters: v.supporters + 1, state: pct >= 1 ? 'funded' : pct > 0.4 ? 'lit' : 'unlit' };
     }));
     const phrase: Phrase = {
-      id: Date.now() + Math.random(),
-      x: p.x, y: p.y - 30,
+      id: Date.now() + Math.random(), x: p.x, y: p.y - 30,
       text: amount >= 1000 ? 'Tu donación no es un número. Es luz que viaja.' : 'Es luz que viaja ✦',
     };
     setPhrases((ps) => [...ps, phrase]);
@@ -480,22 +533,23 @@ export default function World() {
           <div className="flower-of-life"><FlowerOfLife /></div>
           <div className="grain" />
 
+          {/* Music button */}
+          <button className="music-btn" onClick={toggleMusic} title={playing ? 'Silenciar' : 'Activar música'}>
+            {playing ? '♫' : '♪'}
+            <span>{playing ? 'Silenciar' : 'Música'}</span>
+          </button>
+
           {/* Top nav */}
           <div className="topbar">
             <div className="brand">
               <div className="brand-mark" />
               <div>
                 <div className="brand-name">Embajadores</div>
-                <div style={{ marginTop: '-4px' }}>
-                  <span className="brand-sub">de la luz</span>
-                </div>
+                <div style={{ marginTop: '-4px' }}><span className="brand-sub">de la luz</span></div>
               </div>
             </div>
             <div className="nav-links">
-              <a>El Mapa</a>
-              <a>Aldeas</a>
-              <a>Manifiesto</a>
-              <a>Embajadores</a>
+              <a>El Mapa</a><a>Aldeas</a><a>Manifiesto</a><a>Embajadores</a>
             </div>
             <div className="lang-pill">ES · MXN ▾</div>
           </div>
@@ -503,11 +557,7 @@ export default function World() {
           {/* Hero */}
           <div className="hero-eyebrow">
             <p className="kicker">~ El mapa vivo de la luz ~</p>
-            <h1>
-              <span className="dash" />
-              Envía Luz
-              <span className="dash" />
-            </h1>
+            <h1><span className="dash" />Envía Luz<span className="dash" /></h1>
           </div>
 
           {/* Side panels */}
@@ -535,7 +585,7 @@ export default function World() {
           <div className="stage">
             <PathsLayer positions={positions} hub={hub} villages={villages} />
 
-            <div className="hub" style={{ left: (hub.x - 140) + 'px', top: (hub.y - 140) + 'px' }}>
+            <div className="hub" style={{ left: (hub.x - 140)+'px', top: (hub.y - 140)+'px' }}>
               <div className="hub-glow" />
               <div className="hub-mandala"><Mandala progress={totalProgress} /></div>
               <div className="hub-core">
@@ -558,7 +608,7 @@ export default function World() {
           <Particles embers={embers} />
 
           {phrases.map((p) => (
-            <div key={p.id} className="float-phrase" style={{ left: p.x + 'px', top: p.y + 'px' }}>
+            <div key={p.id} className="float-phrase" style={{ left: p.x+'px', top: p.y+'px' }}>
               {p.text}
             </div>
           ))}
@@ -578,12 +628,10 @@ export default function World() {
           <div className="hud">
             <div className="hud-stat">
               <div className="hud-stat-lbl">Luz total recolectada</div>
-              <div className="hud-stat-val">${totalRaised.toLocaleString('es-MX')} <span style={{ fontSize: 16, opacity: 0.6, letterSpacing: '0.1em' }}>MXN</span></div>
+              <div className="hud-stat-val">${totalRaised.toLocaleString('es-MX')} <span style={{ fontSize: 16, opacity: 0.6 }}>MXN</span></div>
               <div className="hud-stat-sub">Meta colectiva · ${villages.reduce((a, v) => a + v.target, 0).toLocaleString('es-MX')}</div>
             </div>
-            <div className="hud-center">
-              Toca una aldea para enviarle tu luz. Mira cómo viaja por las venas doradas del mapa.
-            </div>
+            <div className="hud-center">Toca una aldea para enviarle tu luz. Mira cómo viaja por las venas doradas del mapa.</div>
             <div className="hud-stat" style={{ textAlign: 'right', alignItems: 'flex-end' }}>
               <div className="hud-stat-lbl">Embajadores activos</div>
               <div className="hud-stat-val">{totalSupporters.toLocaleString('es-MX')}</div>
@@ -592,9 +640,7 @@ export default function World() {
           </div>
 
           <div className="compass">
-            <div className="compass-ring">
-              <span className="compass-n">N</span>
-            </div>
+            <div className="compass-ring"><span className="compass-n">N</span></div>
           </div>
         </div>
       </div>
