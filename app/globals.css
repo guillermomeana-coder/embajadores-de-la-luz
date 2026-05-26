@@ -1790,6 +1790,8 @@ body {
   background: rgba(4, 8, 20, 0);
   backdrop-filter: blur(0px);
   transition: background 0.7s ease, backdrop-filter 0.7s ease;
+  /* Perspective for book entrance rotateY */
+  perspective: 2400px;
 }
 .book-overlay--opening,
 .book-overlay--open {
@@ -1828,12 +1830,17 @@ body {
   height: min(580px, 82vh);
   z-index: 9002;
   perspective: 1400px;
-  /* Drop shadow: like a heavy tome lit from above */
-  filter:
-    drop-shadow(0 60px 100px rgba(0,0,0,0.85))
-    drop-shadow(0 0 40px rgba(201,135,42,0.12));
+  /* preserve-3d must NOT have filter on same element — filter flattens 3D */
+  transform-style: preserve-3d;
   /* Phase transitions */
   transition: opacity 0.5s ease, transform 0.8s cubic-bezier(.2,.8,.2,1);
+}
+/* Shadow lives on overlay so it doesn't kill preserve-3d */
+.book-overlay--opening .book,
+.book-overlay--open .book {
+  box-shadow:
+    0 60px 100px rgba(0,0,0,0.85),
+    0 0 80px rgba(201,135,42,0.12);
 }
 
 /* Closed: seen from spine angle */
