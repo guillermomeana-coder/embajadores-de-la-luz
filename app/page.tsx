@@ -9,6 +9,38 @@ type Pos = { x: number; y: number };
 type Phrase = { id: number; x: number; y: number; text: string };
 type Ember = { x: number; y: number; tx: number; ty: number; color: string };
 
+// ─── Cursor Light ─────────────────────────────────────────────────────────────
+function CursorLight({ scaleRef }: { scaleRef: React.RefObject<HTMLDivElement | null> }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const el = ref.current;
+      const scaler = scaleRef.current;
+      if (!el || !scaler) return;
+      // Convert screen coords to world coords (1440x900 canvas)
+      const rect = scaler.getBoundingClientRect();
+      const scale = rect.width / 1440;
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.opacity = '1';
+    };
+    const leave = () => { if (ref.current) ref.current.style.opacity = '0'; };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseleave', leave);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseleave', leave); };
+  }, [scaleRef]);
+
+  return (
+    <div ref={ref} className="cursor-light" style={{ opacity: 0 }}>
+      <div className="cursor-aura" />
+      <div className="cursor-core" />
+    </div>
+  );
+}
+
 // ─── Ambient Music (Web Audio API) ───────────────────────────────────────────
 function useAmbientMusic() {
   const ctxRef = useRef<AudioContext | null>(null);
@@ -642,6 +674,8 @@ export default function World() {
           <div className="compass">
             <div className="compass-ring"><span className="compass-n">N</span></div>
           </div>
+
+          <CursorLight scaleRef={scalerRef} />
         </div>
       </div>
     </div>
