@@ -911,25 +911,24 @@ body {
 .village[data-state="lit"] .v-badge { color: var(--ink); font-size: 11px; }
 .village[data-state="funded"] .v-badge { color: var(--ink); box-shadow: 0 0 12px currentColor; }
 
-/* ── Mobile: village nodes smaller so they don't cover hub ── */
+/* ── Mobile: compact villages — all heavy canvases disabled in JS ── */
 @media (max-width: 640px) {
-  .village { width: 100px; height: 115px; }
-  .v-outer-glow { width: 96px; height: 96px; }
-  .v-hex { width: 68px; height: 68px; border-radius: 50%; }
-  .v-building { width: 46px; height: 46px; }
-  .v-label { font-size: 7px; letter-spacing: 0.18em; margin-top: 5px; }
-  .v-badge { width: 16px; height: 16px; font-size: 8px; margin-top: 4px; }
-  .hub { width: 180px; height: 180px; }
-  .hub::before { width: 210px; height: 210px; }
-  .hub::after  { width: 170px; height: 170px; }
-  .hub-mandala { width: 140px; height: 140px; margin: 0 auto; }
-  .hub-glow { inset: -60px; }
-  .hub-label-sm { font-size: 11px; }
-  .hub-core { font-size: 10px; }
+  .village { width: 78px; height: 90px; }
+  .v-outer-glow { width: 72px; height: 72px; }
+  .v-hex { width: 52px; height: 52px; border-radius: 50%; }
+  .v-building { width: 36px; height: 36px; }
+  .v-label { font-size: 6px; letter-spacing: 0.14em; margin-top: 4px; }
+  .v-badge { width: 13px; height: 13px; font-size: 7px; margin-top: 3px; }
+  .v-ring { width: 62px !important; height: 62px !important; }
+  .v-rays { width: 84px; height: 84px; }
 
-  /* Fix ring + rays sizes for mobile */
-  .v-ring { width: 80px !important; height: 80px !important; }
-  .v-rays { width: 110px; height: 110px; }
+  .hub { width: 130px; height: 130px; }
+  .hub::before { width: 155px; height: 155px; }
+  .hub::after  { width: 120px; height: 120px; }
+  .hub-mandala { width: 104px; height: 104px; margin: 0 auto; }
+  .hub-glow { inset: -40px; }
+  .hub-label-sm { font-size: 9px; }
+  .hub-core { font-size: 9px; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

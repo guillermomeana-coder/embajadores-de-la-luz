@@ -1486,8 +1486,9 @@ export default function World() {
 
   const W = win.w;
   const H = win.h;
+  const isMobile = W < 640;
   const hub: Pos = { x: W / 2, y: H * 0.50 };
-  const radius = Math.min(W, H) * (W < 640 ? 0.32 : 0.38);
+  const radius = Math.min(W, H) * (isMobile ? 0.24 : 0.38);
 
   const positions = useMemo<Pos[]>(() =>
     villages.map(v => {
@@ -1562,14 +1563,14 @@ export default function World() {
       <div className={`world${selectedId?' has-card':''}`} ref={worldRef}>
         <div className="canopy"/>
         <div className="rays"/>
-        <div className="flower-of-life"><FlowerOfLife/></div>
+        {!isMobile && <div className="flower-of-life"><FlowerOfLife/></div>}
         <div className="grain"/>
-        <ForestEdges/>
+        {!isMobile && <ForestEdges/>}
 
-        {/* ── Atmospheric Systems ─────────────────────────────── */}
-        <LightRays cx={hub.x} cy={hub.y} />
-        <JourneyFog />
-        <ClothParticles />
+        {/* ── Atmospheric Systems — desktop only (too heavy for mobile) ── */}
+        {!isMobile && <LightRays cx={hub.x} cy={hub.y} />}
+        {!isMobile && <JourneyFog />}
+        {!isMobile && <ClothParticles />}
 
         <ScreenFlash trigger={flashTrigger}/>
 
@@ -1627,7 +1628,7 @@ export default function World() {
         <div className={`stage${selectedId ? ' zoomed' : ''}`} style={{ transform: stageTransform }}>
           <PathsLayer positions={positions} hub={hub} villages={villages} W={W} H={H}/>
 
-          <div className="hub" style={{left:(hub.x-(W<640?90:140))+'px', top:(hub.y-(W<640?90:140))+'px'}}>
+          <div className="hub" style={{left:(hub.x-(isMobile?65:140))+'px', top:(hub.y-(isMobile?65:140))+'px'}}>
             <div className="hub-glow"/>
             <div className="hub-mandala"><Mandala progress={totalProgress}/></div>
             <div className="hub-core">
@@ -1644,7 +1645,7 @@ export default function World() {
           ))}
         </div>
 
-        <Particles embers={embers}/>
+        <Particles density={isMobile ? 0.08 : 1} embers={embers}/>
 
         {phrases.map(p=>(
           <div key={p.id} className="float-phrase" style={{left:p.x+'px', top:p.y+'px'}}>{p.text}</div>
